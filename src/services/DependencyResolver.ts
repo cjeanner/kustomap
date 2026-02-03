@@ -26,11 +26,54 @@ export class DependencyResolver {
 
     console.log(`✓ ${edges.length} arête(s) créée(s)`);
 
+    // NOUVELLE ÉTAPE : Corriger les types basés sur comment ils sont référencés
+    this.correctNodeTypes(nodeMap, edges);
+
     return {
       nodes: nodeMap,
       edges,
       rootPath: nodes[0]?.path || ''
     };
+  }
+
+  /**
+   * Corrige les types de nœuds selon comment ils sont référencés
+   */
+  private correctNodeTypes(
+    nodeMap: Map<string, KustomizeNode>,
+    edges: DependencyEdge[]
+  ): void {
+    console.log('\n🔄 Correction des types de nœuds...');
+
+    // Compter comment chaque nœud est référencé
+    const nodeReferenceTypes = new Map<string, Set<'resource' | 'base' | 'component'>>();
+
+    for (const edge of edges) {
+      if (!nodeReferenceTypes.has(edge.target)) {
+        nodeReferenceTypes.set(edge.target, new Set());
+      }
+      nodeReferenceTypes.get(edge.target)!.add(edge.type);
+    }
+
+    // Appliquer les corrections
+    for (const [nodeId, refTypes] of nodeReferenceTypes.entries()) {
+      const node = Array.from(nodeMap.values()).find(n => n.id === nodeId);
+      if (!node) continue;
+
+      const oldType = node.type;
+
+      // Priorité : component > base > resource
+      if (refTypes.has('component')) {
+        node.type = 'component';
+      } else if (refTypes.has('base')) {
+        node.type = 'base';
+      }
+      // Si seulement 'resource', garder le type déterminé par le chemin
+
+      if (oldType !== node.type) {
+        console.log(`  📝 ${node.path}: ${oldType} → ${node.type}`);
+      }
+    }
   }
 
   private buildEdgesForNode(
@@ -39,14 +82,18 @@ export class DependencyResolver {
     edges: DependencyEdge[]
   ): void {
     const kustomization = node.kustomizationContent;
-
     console.log(`\n  🔍 Analyse du nœud: ${node.path}`);
 
     // Traiter resources
     if (kustomization.resources && kustomization.resources.length > 0) {
       console.log(`    📦 Resources: ${kustomization.resources.length}`);
       for (const resource of kustomization.resources) {
-        this.processReference(node, resource, 'resource', nodeMap, edges);
+        // Ignorer les fichiers YAML simples
+        if (!resource.endsWith('.yaml') && !resource.endsWith('.yml')) {
+          this.processReference(node, resource, 'resource', nodeMap, edges);
+        } else {
+          console.log(`    ℹ️ Ignoré (fichier YAML): ${resource}`);
+        }
       }
     }
 
@@ -78,7 +125,7 @@ export class DependencyResolver {
 
     if (this.isRemoteUrl(reference)) {
       // C'est une URL distante (GitHub, etc.)
-      console.log(`        ℹ️  URL distante détectée`);
+      console.log(`        ℹ️ URL distante détectée`);
 
       // Créer un nœud virtuel pour cette dépendance distante
       const remoteNodeId = `remote-${this.edgeCounter}`;
@@ -107,7 +154,6 @@ export class DependencyResolver {
           remoteUrl: reference,
           loaded: false
         };
-
         nodeMap.set(virtualNode.path, virtualNode);
         console.log(`        + Nœud virtuel créé: ${remoteDisplayName}`);
       }
@@ -120,16 +166,13 @@ export class DependencyResolver {
         type,
         label: this.extractLabelFromUrl(reference)
       });
-
       console.log(`        ✓ Arête créée`);
-
     } else if (this.isLocalPath(reference)) {
       // C'est un chemin local relatif
       const resolvedPath = this.resolvePath(sourceNode.path, reference);
       console.log(`        📂 Chemin local: ${reference} → ${resolvedPath}`);
 
       const targetNode = nodeMap.get(resolvedPath);
-
       if (targetNode) {
         edges.push({
           id: `edge-${this.edgeCounter++}`,
@@ -140,7 +183,7 @@ export class DependencyResolver {
         });
         console.log(`        ✓ Arête créée vers: ${targetNode.path}`);
       } else {
-        console.log(`        ⚠️  Nœud cible non trouvé: ${resolvedPath}`);
+        console.log(`        ⚠️ Nœud cible non trouvé: ${resolvedPath}`);
 
         // Créer un nœud "manquant" pour visualiser la dépendance cassée
         const missingNodeId = `missing-${this.edgeCounter}`;
@@ -152,7 +195,6 @@ export class DependencyResolver {
           isRemote: false,
           loaded: false
         };
-
         nodeMap.set(missingNode.path, missingNode);
 
         edges.push({
@@ -162,7 +204,6 @@ export class DependencyResolver {
           type,
           label: reference
         });
-
         console.log(`        + Nœud "manquant" créé`);
       }
     }
@@ -180,7 +221,6 @@ export class DependencyResolver {
     // Extraire un nom d'affichage depuis une URL GitHub
     // Ex: https://github.com/org/repo/components/argocd/annotations?ref=cleaning
     // → argocd/annotations
-
     try {
       // Retirer le ?ref=... si présent
       const cleanUrl = url.split('?')[0];
@@ -260,3 +300,4 @@ export class DependencyResolver {
     return cycles;
   }
 }
+

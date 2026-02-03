@@ -11,10 +11,23 @@ function App() {
   const [graph, setGraph] = useState<KustomizeGraph | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
-  const handleLoadRepo = async (source: string, isLocal: boolean) => {
+  const handleLoadRepo = async (
+    source: string,
+    isLocal: boolean,
+    githubToken?: string,
+    gitlabToken?: string
+  ) => {
     console.log('🚀 Démarrage du chargement...');
 
     const crawler = new GitCrawler();
+
+    // Configurer les tokens si fournis
+    if (githubToken) {
+      crawler.setGitHubToken(githubToken);
+    }
+    if (gitlabToken) {
+      crawler.setGitLabToken(gitlabToken);
+    }
 
     let nodes;
     if (isLocal) {
@@ -57,3 +70,4 @@ function App() {
 }
 
 export default App;
+

@@ -4,13 +4,15 @@ import { LanguageSwitcher } from '../LanguageSwitcher/LanguageSwitcher';
 import './CollapsibleSidebar.css';
 
 interface CollapsibleSidebarProps {
-  onLoadRepo: (source: string, isLocal: boolean) => Promise<void>;
+  onLoadRepo: (source: string, isLocal: boolean, githubToken?: string, gitlabToken?: string) => Promise<void>;
 }
 
 export const CollapsibleSidebar: React.FC<CollapsibleSidebarProps> = ({ onLoadRepo }) => {
   const { t } = useTranslation();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [repoUrl, setRepoUrl] = useState('');
+  const [githubToken, setGithubToken] = useState('');
+  const [gitlabToken, setGitlabToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastLoaded, setLastLoaded] = useState<string>('');
@@ -23,7 +25,7 @@ export const CollapsibleSidebar: React.FC<CollapsibleSidebarProps> = ({ onLoadRe
     setError(null);
 
     try {
-      await onLoadRepo(repoUrl, false);
+      await onLoadRepo(repoUrl, false, githubToken || undefined, gitlabToken || undefined);
       setLastLoaded(repoUrl);
     } catch (err) {
       const message = err instanceof Error ? err.message : t('errors.unknownError');
@@ -50,20 +52,20 @@ export const CollapsibleSidebar: React.FC<CollapsibleSidebarProps> = ({ onLoadRe
 
   return (
     <div className={`collapsible-sidebar left ${isCollapsed ? 'collapsed' : ''}`}>
-      <button 
+      <button
         className="collapse-toggle"
         onClick={() => setIsCollapsed(!isCollapsed)}
         title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         {isCollapsed ? '▶' : '◀'}
       </button>
-      
+
       {!isCollapsed && (
         <div className="sidebar-content">
           <h1>{t('sidebar.title')}</h1>
-          
+
           <LanguageSwitcher />
-          
+
           <form onSubmit={handleSubmit} className="load-form">
             <label htmlFor="repo-url">{t('sidebar.repoUrlLabel')}</label>
             <input
@@ -74,7 +76,45 @@ export const CollapsibleSidebar: React.FC<CollapsibleSidebarProps> = ({ onLoadRe
               placeholder={t('sidebar.repoUrlPlaceholder')}
               disabled={loading}
             />
-            
+
+            <details className="token-section">
+              <summary>🔑 API Tokens (optionnel)</summary>
+
+              <label htmlFor="github-token">
+                GitHub Token
+                <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" className="help-link">
+                  ?
+                </a>
+              </label>
+              <input
+                id="github-token"
+                type="password"
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+                placeholder="ghp_..."
+                disabled={loading}
+              />
+
+              <label htmlFor="gitlab-token">
+                GitLab Token
+                <a href="https://gitlab.com/-/profile/personal_access_tokens" target="_blank" rel="noopener noreferrer" className="help-link">
+                  ?
+                </a>
+              </label>
+              <input
+                id="gitlab-token"
+                type="password"
+                value={gitlabToken}
+                onChange={(e) => setGitlabToken(e.target.value)}
+                placeholder="glpat-..."
+                disabled={loading}
+              />
+
+              <small className="token-help">
+                Les tokens augmentent les limites: GitHub 60→5000 req/h
+              </small>
+            </details>
+
             <button type="submit" disabled={loading || !repoUrl.trim()}>
               {loading ? `🔄 ${t('sidebar.loading')}` : `🌐 ${t('sidebar.loadRemote')}`}
             </button>
@@ -84,7 +124,7 @@ export const CollapsibleSidebar: React.FC<CollapsibleSidebarProps> = ({ onLoadRe
             <span>{t('sidebar.orSeparator')}</span>
           </div>
 
-          <button 
+          <button
             onClick={handleLoadLocal}
             disabled={loading}
             className="load-button local-button"

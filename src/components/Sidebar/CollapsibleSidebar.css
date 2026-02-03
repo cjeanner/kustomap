@@ -225,3 +225,59 @@
 .sidebar-content::-webkit-scrollbar-thumb:hover {
   background: #5a7a9f;
 }
+.token-section {
+  margin: 10px 0;
+  padding: 10px;
+  background-color: #34495e;
+  border-radius: 6px;
+}
+
+.token-section summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #3498db;
+  margin-bottom: 10px;
+  user-select: none;
+}
+
+.token-section summary:hover {
+  color: #2980b9;
+}
+
+.token-section[open] summary {
+  margin-bottom: 15px;
+}
+
+.token-section label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.help-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background-color: #3498db;
+  color: white;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.help-link:hover {
+  background-color: #2980b9;
+}
+
+.token-help {
+  display: block;
+  margin-top: 10px;
+  color: #95a5a6;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
