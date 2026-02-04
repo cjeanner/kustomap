@@ -1,35 +1,21 @@
-# Stage 1: Build
-FROM node:22-alpine AS builder
+# Build stage
+FROM golang:1.23-alpine AS builder
+WORKDIR /src
 
-WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Copier les fichiers de dépendances
-COPY package*.json ./
-
-# Installer TOUTES les dépendances (y compris devDependencies)
-RUN npm ci && \
-    npm cache clean --force
-
-# Copier le code source
 COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /kustomize-visualizer .
 
-# Build l'application
-RUN npm run build:web
+# Run stage
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY --from=builder /kustomize-visualizer .
 
-# Stage 2: Runtime avec nginx
-FROM nginx:alpine
+EXPOSE 3000
+ENV PORT=3000
 
-# Copier la configuration nginx
-COPY nginx.conf /etc/nginx/nginx.conf
-
-# Copier les fichiers buildés
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Exposer le port 80
-EXPOSE 80
-
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
-
-CMD ["nginx", "-g", "daemon off;"]
+USER nobody
+ENTRYPOINT ["./kustomize-visualizer"]

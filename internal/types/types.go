@@ -1,0 +1,43 @@
+package types
+
+// Graph represents the complete graph
+type Graph struct {
+	ID       string    `json:"id"`
+	Elements []Element `json:"elements"`
+	Created  string    `json:"created"`
+}
+
+// Element can be a node or an edge
+type Element struct {
+	Group string      `json:"group"` // "nodes" ou "edges"
+	Data  ElementData `json:"data"`
+}
+
+type ElementData struct {
+	// Common
+	ID string `json:"id"`
+
+	// For nodes
+	Label   string                 `json:"label,omitempty"`
+	Type    string                 `json:"type,omitempty"` // "resource", "overlay", "component"
+	Path    string                 `json:"path,omitempty"`
+	Content map[string]interface{} `json:"content,omitempty"` // kustomization.yaml content
+
+	// For edges
+	Source   string `json:"source,omitempty"`
+	Target   string `json:"target,omitempty"`
+	EdgeType string `json:"edgeType,omitempty"` // "base", "resource", "patch"
+}
+
+// NodeDetails for details endpoint
+type NodeDetails struct {
+	ID      string                 `json:"id"`
+	Label   string                 `json:"label"`
+	Type    string                 `json:"type"`
+	Path    string                 `json:"path"`
+	Content map[string]interface{} `json:"content"`
+
+	// Relations
+	Parents  []string `json:"parents"`  // Nodes pointing to current node
+	Children []string `json:"children"` // Nodes pointed by current node
+}
