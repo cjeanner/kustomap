@@ -14,7 +14,7 @@ export class GitCrawler {
     private nodeCounter = 0;
     private githubToken?: string;
     private gitlabToken?: string;
-    private visited = new Set<string>();
+    private visited = new Map<string, KustomizeNode>();
 
     /**
      * Définir le token GitHub
@@ -37,7 +37,7 @@ export class GitCrawler {
         console.log(`\n🚀 Démarrage du crawl depuis: ${overlayUrl}`);
 
         this.nodeCounter = 0;
-        this.visited.clear();
+        this.visited.clear();  // ← Pas de changement ici, .clear() marche pour Map et Set
 
         const nodes: KustomizeNode[] = [];
 
@@ -51,84 +51,87 @@ export class GitCrawler {
         }
     }
 
-    /**
-     * Crawl récursif d'un kustomization.yaml
-     */
     private async crawlKustomization(
         url: string,
         nodes: KustomizeNode[],
         referenceType: 'resource' | 'component' | null
     ): Promise<KustomizeNode> {
-        // Normaliser l'URL pour détecter les doublons
         const normalizedUrl = this.normalizeUrl(url);
 
-        // Vérifier si déjà visité
+        // Vérifier si déjà visité - maintenant on a directement le nœud
         if (this.visited.has(normalizedUrl)) {
+            const existingNode = this.visited.get(normalizedUrl)!;
             console.log(`  ⏭️ Déjà visité: ${normalizedUrl}`);
-            // Trouver le nœud existant
-            const existingNode = nodes.find(n => n.remoteUrl === normalizedUrl);
-            if (existingNode) {
-                return existingNode;
-            }
+            return existingNode;
         }
 
-        this.visited.add(normalizedUrl);
         console.log(`\n🔍 Crawl: ${normalizedUrl}`);
 
-        // Télécharger et parser le kustomization.yaml
         let kustomization: KustomizationYaml;
         let kustomizationUrl: string;
+        let node: KustomizeNode;
 
         try {
             kustomizationUrl = this.ensureKustomizationYaml(normalizedUrl);
             const content = await this.fetchFileContent(kustomizationUrl);
             kustomization = yaml.parse(content) as KustomizationYaml;
             console.log(`  ✓ kustomization.yaml chargé`);
+
+            node = this.createNode(normalizedUrl, kustomization, referenceType);
         } catch (error) {
-            console.warn(`  ⚠️ Impossible de charger kustomization.yaml:`, error);
-            throw error;
+            console.error(`  ⚠️ Impossible de charger kustomization.yaml:`, error);
+
+            node = this.createErrorNode(
+                normalizedUrl,
+                referenceType || 'resource',
+                error instanceof Error ? error.message : String(error)
+            );
         }
 
-        // Créer le nœud
-        const node = this.createNode(normalizedUrl, kustomization, referenceType);
+        // Ajouter le nœud à la liste ET au cache
         nodes.push(node);
+        this.visited.set(normalizedUrl, node);  // ← Stocker directement
         console.log(`  ✓ Nœud créé: ${node.id} (type: ${node.type})`);
 
-        // Traiter les resources
-        if (kustomization.resources && kustomization.resources.length > 0) {
-            console.log(`  📦 Traitement de ${kustomization.resources.length} resource(s)...`);
-            for (const resource of kustomization.resources) {
-                await this.processResource(resource, normalizedUrl, nodes);
-            }
-        }
+        // Traiter resources/bases/components seulement si pas en erreur
+        if (!node.error) {
+            const kustomization = node.kustomizationContent;
 
-        // Traiter les bases (déprécié, traité comme resources)
-        if (kustomization.bases && kustomization.bases.length > 0) {
-            console.log(`  📦 Traitement de ${kustomization.bases.length} base(s) [déprécié]...`);
-            for (const base of kustomization.bases) {
-                await this.processResource(base, normalizedUrl, nodes);
+            if (kustomization.resources && kustomization.resources.length > 0) {
+                console.log(`  📦 Traitement de ${kustomization.resources.length} resource(s)...`);
+                for (const resource of kustomization.resources) {
+                    await this.processResource(resource, normalizedUrl, nodes);
+                }
             }
-        }
 
-        // Traiter les components
-        if (kustomization.components && kustomization.components.length > 0) {
-            console.log(`  🧩 Traitement de ${kustomization.components.length} component(s)...`);
-            for (const component of kustomization.components) {
-                await this.processComponent(component, normalizedUrl, nodes);
+            if (kustomization.bases && kustomization.bases.length > 0) {
+                console.log(`  📦 Traitement de ${kustomization.bases.length} base(s) [déprécié]...`);
+                for (const base of kustomization.bases) {
+                    await this.processResource(base, normalizedUrl, nodes);
+                }
+            }
+
+            if (kustomization.components && kustomization.components.length > 0) {
+                console.log(`  🧩 Traitement de ${kustomization.components.length} component(s)...`);
+                for (const component of kustomization.components) {
+                    await this.processComponent(component, normalizedUrl, nodes);
+                }
             }
         }
 
         return node;
     }
 
+
+
     /**
      * Traiter une resource
      */
     private async processResource(
-        resource: string,
-        parentUrl: string,
-        nodes: KustomizeNode[]
-    ): Promise<void> {
+            resource: string,
+            parentUrl: string,
+            nodes: KustomizeNode[]
+            ): Promise<void> {
         console.log(`    📄 Resource: ${resource}`);
 
         // SI c'est un fichier YAML simple, IGNORER
@@ -145,18 +148,67 @@ export class GitCrawler {
         try {
             await this.crawlKustomization(resolvedUrl, nodes, 'resource');
         } catch (error) {
+            // Pour les resources, c'est normal qu'il n'y ait pas de kustomization
             console.warn(`      ⚠️ Pas de kustomization.yaml trouvé (ignoré)`);
+            // Pas de nœud d'erreur pour les resources - c'est optionnel
         }
     }
+
+    /**
+     * Créer un nœud d'erreur
+     */
+    /**
+     * Créer un nœud d'erreur
+     */
+    private createErrorNode(
+        url: string,
+        type: 'resource' | 'component',
+        errorMessage: string
+    ): KustomizeNode {
+        try {
+            const components = this.parseGitUrl(url);
+            const displayPath = components.path || '.';
+
+            return {
+                id: `node-${this.nodeCounter++}-error`,
+                path: displayPath,
+                type,
+                kustomizationContent: {
+                    apiVersion: 'kustomize.config.k8s.io/v1beta1',
+                    kind: 'Kustomization'
+                } as KustomizationYaml,
+                isRemote: true,
+                remoteUrl: url,
+                loaded: false,
+                error: errorMessage
+            };
+        } catch (parseError) {
+            // Si même le parsing échoue, créer un nœud minimal
+            return {
+                id: `node-${this.nodeCounter++}-error`,
+                path: url,
+                type,
+                kustomizationContent: {
+                    apiVersion: 'kustomize.config.k8s.io/v1beta1',
+                    kind: 'Kustomization'
+                } as KustomizationYaml,
+                isRemote: true,
+                remoteUrl: url,
+                loaded: false,
+                error: `Parse error: ${parseError}. Original: ${errorMessage}`
+            };
+        }
+    }
+
 
     /**
      * Traiter un component
      */
     private async processComponent(
-        component: string,
-        parentUrl: string,
-        nodes: KustomizeNode[]
-    ): Promise<void> {
+            component: string,
+            parentUrl: string,
+            nodes: KustomizeNode[]
+            ): Promise<void> {
         console.log(`    🧩 Component: ${component}`);
 
         // Résoudre l'URL complète
@@ -164,22 +216,19 @@ export class GitCrawler {
         console.log(`      → Résolu: ${resolvedUrl}`);
 
         // Les components DOIVENT avoir un kustomization.yaml
-        try {
-            await this.crawlKustomization(resolvedUrl, nodes, 'component');
-        } catch (error) {
-            console.error(`      ❌ Erreur: component sans kustomization.yaml`);
-            throw error;
-        }
+        // crawlKustomization créera un nœud d'erreur si nécessaire
+        await this.crawlKustomization(resolvedUrl, nodes, 'component');
     }
+
 
     /**
      * Créer un nœud
      */
     private createNode(
-        url: string,
-        kustomization: KustomizationYaml,
-        referenceType: 'resource' | 'component' | null
-    ): KustomizeNode {
+            url: string,
+            kustomization: KustomizationYaml,
+            referenceType: 'resource' | 'component' | null
+            ): KustomizeNode {
         const components = this.parseGitUrl(url);
         const displayPath = components.path || '.';
 
@@ -188,13 +237,13 @@ export class GitCrawler {
         const type = referenceType || 'resource';
 
         return {
-            id: `node-${this.nodeCounter++}`,
-            path: displayPath,
-            type,
-            kustomizationContent: kustomization,
-            isRemote: true,
-            remoteUrl: url,
-            loaded: true
+id: `node-${this.nodeCounter++}`,
+    path: displayPath,
+    type,
+    kustomizationContent: kustomization,
+    isRemote: true,
+    remoteUrl: url,
+    loaded: true
         };
     }
 
@@ -204,8 +253,8 @@ export class GitCrawler {
     private isYamlFile(path: string): boolean {
         const lower = path.toLowerCase();
         return (lower.endsWith('.yaml') || lower.endsWith('.yml')) &&
-               !lower.endsWith('kustomization.yaml') &&
-               !lower.endsWith('kustomization.yml');
+            !lower.endsWith('kustomization.yaml') &&
+            !lower.endsWith('kustomization.yml');
     }
 
     /**
@@ -232,13 +281,13 @@ export class GitCrawler {
 
         // Reconstruire l'URL
         return this.buildGitUrl(
-            components.provider,
-            components.host,
-            components.owner,
-            components.repo,
-            components.ref,
-            resolvedPath
-        );
+                components.provider,
+                components.host,
+                components.owner,
+                components.repo,
+                components.ref,
+                resolvedPath
+                );
     }
 
     /**
@@ -262,17 +311,57 @@ export class GitCrawler {
     }
 
     /**
-     * Normaliser une URL (retirer /tree/, gérer ?ref=)
+     * Normaliser une URL (préserver la branche pour GitLab)
      */
     private normalizeUrl(url: string): string {
-        // Retirer /tree/ (GitHub) et /-/tree/ (GitLab)
-        let normalized = url.replace(/\/tree\/[^\/]+/, '').replace(/\/-\/tree\/[^\/]+/, '');
+        console.log('🔍 [normalizeUrl] URL avant:', url);
 
-        // Retirer le trailing slash
+        const [baseUrl, queryString] = url.split('?');
+
+        // GitLab: Extraire la branche de /-/tree/branch/path et la mettre en query param
+        const gitlabTreeMatch = baseUrl.match(
+                /(https?:\/\/[^\/]*gitlab[^\/]*\/[^\/]+\/[^\/]+)\/-\/(tree|blob)\/(.+)/
+                );
+
+        if (gitlabTreeMatch) {
+            const repoBase = gitlabTreeMatch[1];
+            const branchAndPath = gitlabTreeMatch[3];
+
+            console.log('🔍 [normalizeUrl] GitLab tree/blob détecté');
+            console.log('  Repo base:', repoBase);
+            console.log('  Branch+Path:', branchAndPath);
+
+            // Stratégie: Assumer que les 2 premiers segments = branche
+            const parts = branchAndPath.split('/');
+            const branch = parts.slice(0, 2).join('/');  // Ex: components/new-base
+            const path = parts.slice(2).join('/');        // Ex: environments/cifmw-demo/...
+
+            console.log('  → Branche extraite:', branch);
+            console.log('  → Path extrait:', path);
+
+            // Reconstruire l'URL avec ?ref=branch
+            const pathPart = path ? `/${path}` : '';
+            const normalized = `${repoBase}${pathPart}?ref=${encodeURIComponent(branch)}`;
+
+            console.log('🔍 [normalizeUrl] URL après:', normalized);
+            return normalized;
+        }
+
+        // GitHub: retirer /tree/branch
+        let normalized = baseUrl.replace(/\/tree\/[^\/]+/, '');
+
+        // Retirer trailing slash
         normalized = normalized.replace(/\/$/, '');
 
+        // Remettre query params
+        if (queryString) {
+            normalized = `${normalized}?${queryString}`;
+        }
+
+        console.log('🔍 [normalizeUrl] URL après:', normalized);
         return normalized;
     }
+
 
     /**
      * S'assurer que l'URL pointe vers kustomization.yaml
@@ -282,8 +371,14 @@ export class GitCrawler {
             return url;
         }
 
-        // Ajouter /kustomization.yaml
-        return `${url}/kustomization.yaml`;
+        // Séparer l'URL des query params
+        const [baseUrl, queryString] = url.split('?');
+
+        // Ajouter /kustomization.yaml à l'URL de base
+        const urlWithFile = `${baseUrl}/kustomization.yaml`;
+
+        // Remettre les query params si présents
+        return queryString ? `${urlWithFile}?${queryString}` : urlWithFile;
     }
 
     /**
@@ -294,38 +389,125 @@ export class GitCrawler {
         const [baseUrl, queryString] = url.split('?');
 
         // Extraire ?ref=VALUE (branch, tag ou hash)
-        const refMatch = queryString?.match(/ref=([^&]+)/);
-        const ref = refMatch ? decodeURIComponent(refMatch[1]) : undefined;
+        // IMPORTANT: Ignorer ?ref_type=heads (c'est juste informatif GitLab)
+        let ref: string | undefined;
+        if (queryString) {
+            const refMatch = queryString.match(/ref=([^&]+)/);
+            if (refMatch) {
+                const refValue = decodeURIComponent(refMatch[1]);
+                // Ignorer si c'est "heads" (indicateur GitLab sans valeur)
+                if (refValue !== 'heads') {
+                    ref = refValue;
+                }
+            }
+        }
 
         // GitHub: https://github.com/owner/repo/path ou https://github.com/owner/repo?ref=branch
         const githubMatch = baseUrl.match(/https?:\/\/(github\.com)\/([^\/]+)\/([^\/]+)(?:\/(.*))?/);
 
         if (githubMatch) {
             return {
-                provider: 'github',
-                host: githubMatch[1],
-                owner: githubMatch[2],
-                repo: githubMatch[3].replace(/\.git$/, ''),
-                ref,
-                path: githubMatch[4] || ''
+provider: 'github',
+          host: githubMatch[1],
+          owner: githubMatch[2],
+          repo: githubMatch[3].replace(/\.git$/, ''),
+          ref,
+          path: githubMatch[4] || ''
             };
         }
 
-        // GitLab: https://gitlab.com/owner/repo/path ou instances internes
-        // Note: on détecte "gitlab" dans le hostname
+        // GitLab avec /-/tree/ ou /-/blob/
+        console.log('🔍 [parseGitUrl] Test regex GitLab tree/blob...');
+        const gitlabTreeMatch = baseUrl.match(
+                /https?:\/\/([^\/]*gitlab[^\/]*)\/([^\/]+)\/([^\/]+)\/-\/(tree|blob)\/(.+)/
+                );
+
+        if (gitlabTreeMatch) {
+            const host = gitlabTreeMatch[1];
+            const owner = gitlabTreeMatch[2];
+            const repo = gitlabTreeMatch[3].replace(/\.git$/, '');
+            const branchAndPath = gitlabTreeMatch[5];
+
+            console.log('✅ [parseGitUrl] GitLab tree/blob URL détectée');
+            console.log('  host:', host);
+            console.log('  owner:', owner);
+            console.log('  repo:', repo);
+            console.log('  branchAndPath:', branchAndPath);
+
+            // Si un ?ref= est fourni (et ce n'est pas "heads"), l'utiliser
+            if (ref) {
+                console.log('  ✅ Utilisation du ?ref= fourni:', ref);
+                return {
+provider: 'gitlab',
+          host,
+          owner,
+          repo,
+          ref,
+          path: branchAndPath
+                };
+            }
+
+            // Sinon, séparer la branche du path via l'API GitLab
+            // PROBLÈME: La branche peut contenir des slashes (ex: components/new-base)
+            // On doit tester progressivement du plus long au plus court
+            console.log('  🔍 Détection de la branche nécessaire (testing via heuristique)');
+
+            // Heuristique simple: tester les 2-3 premiers segments comme branche
+            const parts = branchAndPath.split('/');
+
+            // Essayer 3 segments max pour la branche (ex: feat/sub/branch)
+            for (let i = Math.min(3, parts.length); i > 0; i--) {
+                const potentialBranch = parts.slice(0, i).join('/');
+                const potentialPath = parts.slice(i).join('/');
+
+                console.log(`  🧪 Test: branch="${potentialBranch}", path="${potentialPath}"`);
+
+                // Pour l'instant, on prend la première combinaison qui "semble" raisonnable
+                // Idéalement, on devrait valider via l'API, mais pour la performance...
+
+                // Si on a au moins 2 segments, c'est probablement la branche
+                if (i >= 2) {
+                    console.log(`  ✅ Assumé comme branche: ${potentialBranch}`);
+                    return {
+provider: 'gitlab',
+          host,
+          owner,
+          repo,
+          ref: potentialBranch,
+          path: potentialPath
+                    };
+                }
+            }
+
+            // Fallback: tout est la branche, path vide
+            console.warn('  ⚠️ Impossible de séparer branche/path, utilisation de tout comme branche');
+            return {
+provider: 'gitlab',
+          host,
+          owner,
+          repo,
+          ref: branchAndPath,
+          path: ''
+            };
+        }
+
+        // GitLab simplifié: https://gitlab.host/owner/repo/path
+        console.log('🔍 [parseGitUrl] Test regex GitLab simple...');
         const gitlabMatch = baseUrl.match(/https?:\/\/([^\/]*gitlab[^\/]*)\/([^\/]+)\/([^\/]+)(?:\/(.*))?/);
 
         if (gitlabMatch) {
+            console.log('✅ [parseGitUrl] GitLab URL simple détectée');
             return {
-                provider: 'gitlab',
-                host: gitlabMatch[1],
-                owner: gitlabMatch[2],
-                repo: gitlabMatch[3].replace(/\.git$/, ''),
-                ref,
-                path: gitlabMatch[4] || ''
+provider: 'gitlab',
+          host: gitlabMatch[1],
+          owner: gitlabMatch[2],
+          repo: gitlabMatch[3].replace(/\.git$/, ''),
+          ref: ref || 'main',  // Défaut à main si pas de ref
+          path: gitlabMatch[4] || ''
             };
         }
 
+        console.error('❌ [parseGitUrl] Aucune regex ne matche!');
         throw new Error(`URL non reconnue: ${url}. Formats supportés: GitHub et GitLab`);
     }
 
@@ -333,13 +515,13 @@ export class GitCrawler {
      * Construire une URL Git
      */
     private buildGitUrl(
-        provider: 'github' | 'gitlab',
-        host: string,
-        owner: string,
-        repo: string,
-        ref: string | undefined,
-        path: string
-    ): string {
+            _provider: 'github' | 'gitlab',
+            host: string,
+            owner: string,
+            repo: string,
+            ref: string | undefined,
+            path: string
+            ): string {
         const pathPart = path ? `/${path}` : '';
         const baseUrl = `https://${host}/${owner}/${repo}${pathPart}`;
 
@@ -385,9 +567,9 @@ export class GitCrawler {
                     ? new Date(parseInt(rateLimitReset) * 1000).toLocaleTimeString()
                     : 'inconnu';
                 throw new Error(
-                    `Rate limit GitHub atteint. Réinitialisation à ${resetDate}. ` +
-                    `Ajoutez un token GitHub pour augmenter la limite à 5000 req/h.`
-                );
+                        `Rate limit GitHub atteint. Réinitialisation à ${resetDate}. ` +
+                        `Ajoutez un token GitHub pour augmenter la limite à 5000 req/h.`
+                        );
             }
             throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
         }
@@ -409,10 +591,28 @@ export class GitCrawler {
      * Télécharger depuis GitLab
      */
     private async fetchGitLabFile(components: GitUrlComponents): Promise<string> {
-        const ref = components.ref || 'main';
+        // Si pas de ref fourni, on doit deviner la branche
+        let ref = components.ref;
+        let filePath = components.path;
+
+        // Si le path contient potentiellement une branche (ex: "components/new-base/path/to/file")
+        // et qu'on n'a pas de ref explicite, on doit tester
+        if (!ref && filePath.includes('/')) {
+            console.log('🔍 [fetchGitLabFile] Tentative de détection de branche...');
+            const result = await this.detectGitLabBranch(components.host, components.owner, components.repo, filePath);
+            ref = result.branch;
+            filePath = result.path;
+        }
+
+        ref = ref || 'main';
+
         const projectPath = encodeURIComponent(`${components.owner}/${components.repo}`);
-        const filePath = encodeURIComponent(components.path);
-        const apiUrl = `https://${components.host}/api/v4/projects/${projectPath}/repository/files/${filePath}/raw?ref=${ref}`;
+        const encodedFilePath = encodeURIComponent(filePath);
+        const apiUrl = `https://${components.host}/api/v4/projects/${projectPath}/repository/files/${encodedFilePath}/raw?ref=${encodeURIComponent(ref)}`;
+
+        console.log(`📡 [fetchGitLabFile] API URL:`, apiUrl);
+        console.log(`   Branch: ${ref}`);
+        console.log(`   File: ${filePath}`);
 
         const headers: Record<string, string> = {};
 
@@ -423,14 +623,65 @@ export class GitCrawler {
         const response = await fetch(apiUrl, { headers });
 
         if (!response.ok) {
-            if (response.status === 401) {
-                throw new Error('GitLab: Token invalide ou manquant pour ce projet privé');
-            }
-            throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
+            throw new Error(`GitLab API error: ${response.status} - Branch: ${ref}, File: ${filePath}`);
         }
 
         return await response.text();
     }
+
+    /**
+     * Détecter la branche GitLab en testant progressivement
+     */
+    private async detectGitLabBranch(
+            host: string,
+            owner: string,
+            repo: string,
+            pathWithBranch: string
+            ): Promise<{ branch: string; path: string }> {
+        const parts = pathWithBranch.split('/');
+        const projectPath = encodeURIComponent(`${owner}/${repo}`);
+
+        console.log('🧪 [detectGitLabBranch] Test de', parts.length, 'combinaisons possibles');
+
+        // Tester du plus long (3 segments max) au plus court
+        for (let i = Math.min(3, parts.length); i > 0; i--) {
+            const potentialBranch = parts.slice(0, i).join('/');
+            const potentialPath = parts.slice(i).join('/');
+
+            console.log(`  🧪 Test: branch="${potentialBranch}", path="${potentialPath}"`);
+
+            try {
+                // Vérifier si la branche existe via l'API
+                const branchUrl = `https://${host}/api/v4/projects/${projectPath}/repository/branches/${encodeURIComponent(potentialBranch)}`;
+
+                const headers: Record<string, string> = {};
+                if (this.gitlabToken) {
+                    headers['PRIVATE-TOKEN'] = this.gitlabToken;
+                }
+
+                const response = await fetch(branchUrl, { headers });
+
+                if (response.ok) {
+                    console.log(`  ✅ Branche trouvée: ${potentialBranch}`);
+                    return {
+branch: potentialBranch,
+        path: potentialPath
+                    };
+                }
+            } catch (error) {
+                console.log(`  ❌ Erreur test branche "${potentialBranch}":`, error);
+            }
+        }
+
+        // Fallback: première partie = branche, reste = path
+        console.warn('  ⚠️ Aucune branche validée, utilisation heuristique');
+        return {
+branch: parts[0],
+        path: parts.slice(1).join('/')
+        };
+    }
+
+
 
     /**
      * Scan local (conservé pour compatibilité)
@@ -469,15 +720,15 @@ export class GitCrawler {
                         .replace(/^[\/\\]/, '')
                         .replace(/[\/\\]kustomization\.yaml$/, '')
                         .replace(/\\/g, '/')
-                        || '.';
+                            || '.';
 
                     const node: KustomizeNode = {
-                        id: `node-${this.nodeCounter++}`,
-                        path: relativePath,
-                        type: 'resource',
-                        kustomizationContent: kustomization,
-                        isRemote: false,
-                        loaded: true
+id: `node-${this.nodeCounter++}`,
+    path: relativePath,
+    type: 'resource',
+    kustomizationContent: kustomization,
+    isRemote: false,
+    loaded: true
                     };
 
                     nodes.push(node);

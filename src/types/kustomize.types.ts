@@ -6,6 +6,7 @@ export interface KustomizeNode {
   isRemote: boolean;
   remoteUrl?: string;
   loaded: boolean;
+  error?: string;
 }
 
 export interface DependencyEdge {
