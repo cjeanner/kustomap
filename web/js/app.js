@@ -316,6 +316,34 @@ class App {
         }
     }
 
+    /**
+     * Persists current token input values to localStorage when storage is enabled.
+     * Call this on form submit so tokens are saved even if the user never blurred the field.
+     */
+    async persistTokensFromForm() {
+        const storeCheckbox = document.getElementById('store-tokens');
+        if (!storeCheckbox?.checked) return;
+
+        const githubEl = document.getElementById('github-token');
+        const gitlabEl = document.getElementById('gitlab-token');
+        if (!githubEl || !gitlabEl) return;
+
+        for (const [name, storageKey] of Object.entries(TOKEN_STORAGE_KEYS)) {
+            const el = name === 'github' ? githubEl : gitlabEl;
+            const value = el.value?.trim();
+            if (value) {
+                try {
+                    const encrypted = await encryptToken(value);
+                    localStorage.setItem(storageKey, encrypted);
+                } catch (_) {
+                    localStorage.setItem(storageKey, value);
+                }
+            } else {
+                localStorage.removeItem(storageKey);
+            }
+        }
+    }
+
     setupTokenPersistence() {
         const storeCheckbox = document.getElementById('store-tokens');
 
@@ -369,6 +397,9 @@ class App {
         const url = formData.get('url');
         const github_token = formData.get('github_token');
         const gitlab_token = formData.get('gitlab_token');
+
+        // Persist both tokens to localStorage on submit (in case user never blurred the field)
+        await this.persistTokensFromForm();
 
         this.hideError();
         this.setLoading(true);
