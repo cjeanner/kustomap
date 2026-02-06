@@ -200,10 +200,18 @@ function renderGraph(container, graphData, onNodeClick) {
     // Resize handler for full-window responsiveness
     window.addEventListener('resize', () => {
         cy.resize();
-        //cy.fit();
     });
 
     return cy;
+}
+
+// Setup build modal close/backdrop (call after renderGraph). Build is triggered from sidebar button.
+function setupBuildModal(app) {
+    const buildModal = document.getElementById('build-modal');
+    const buildModalClose = document.getElementById('build-modal-close');
+    const buildModalBackdrop = buildModal?.querySelector('.build-modal-backdrop');
+    buildModalClose?.addEventListener('click', () => buildModal?.classList.add('hidden'));
+    buildModalBackdrop?.addEventListener('click', () => buildModal?.classList.add('hidden'));
 }
 
 // Main App
@@ -456,6 +464,7 @@ class App {
             this.cy = renderGraph(container, graphData, (nodeData) => {
                 this.showNodeDetails(nodeData);
             });
+            setupBuildModal(this);
         } catch (error) {
             this.showGraphError(error.message);
         }
@@ -468,6 +477,40 @@ class App {
 
     hideGraphError() {
         this.graphErrorDiv.classList.add('hidden');
+    }
+
+    async runBuild(nodeId, nodeLabel) {
+        const buildLoading = document.getElementById('build-loading');
+        const buildModal = document.getElementById('build-modal');
+        const buildModalTitle = document.getElementById('build-modal-title');
+        const buildModalContent = document.getElementById('build-modal-content');
+        if (!nodeId || !this.currentGraphId || !buildLoading || !buildModal) return;
+        buildLoading.classList.remove('hidden');
+        const githubToken = document.getElementById('github-token')?.value?.trim() || '';
+        const gitlabToken = document.getElementById('gitlab-token')?.value?.trim() || '';
+        try {
+            const res = await fetch(`/api/v1/node/${this.currentGraphId}/${encodeURIComponent(nodeId)}/build`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ github_token: githubToken, gitlab_token: gitlabToken }),
+            });
+            const data = await res.json();
+            buildLoading.classList.add('hidden');
+            if (!res.ok) {
+                buildModalTitle.textContent = 'Build failed';
+                buildModalContent.textContent = data.message || res.statusText || 'Unknown error';
+                buildModal.classList.remove('hidden');
+                return;
+            }
+            buildModalTitle.textContent = `Build: ${nodeLabel}`;
+            buildModalContent.textContent = data.yaml || '';
+            buildModal.classList.remove('hidden');
+        } catch (err) {
+            buildLoading.classList.add('hidden');
+            buildModalTitle.textContent = 'Build failed';
+            buildModalContent.textContent = err.message || 'Network error';
+            buildModal.classList.remove('hidden');
+        }
     }
 
     showForm() {
@@ -504,6 +547,13 @@ class App {
 
             const nodeDetails = await response.json();
 
+            // Build overlay button: only for directories (overlay/resource dirs), not single .yaml/.yml files or components
+            const pathIsFile = (p) => p && (p.toLowerCase().endsWith('.yaml') || p.toLowerCase().endsWith('.yml'));
+            const canBuild = nodeDetails.type !== 'component' && nodeDetails.type !== 'error' && !pathIsFile(nodeDetails.path);
+            const buildButtonHtml = canBuild
+                ? `<p class="node-info-actions"><button type="button" class="build-overlay-btn" data-node-id="${nodeDetails.id}" data-node-label="${nodeDetails.label || nodeDetails.id}">Build overlay</button></p>`
+                : '';
+
             // Afficher les détails complets
             let html = `
             <h2>${nodeDetails.label || nodeDetails.id}</h2>
@@ -511,6 +561,7 @@ class App {
                 <p><strong>ID:</strong> ${nodeDetails.id}</p>
                 <p><strong>Type:</strong> <span class="badge badge-${nodeDetails.type}">${nodeDetails.type}</span></p>
                 ${nodeDetails.path ? `<p><strong>Path:</strong> <code>${nodeDetails.path}</code></p>` : ''}
+                ${buildButtonHtml}
             </div>
         `;
 
@@ -547,6 +598,15 @@ class App {
             }
 
             this.sidebarContent.innerHTML = html;
+
+            // Build overlay button
+            this.sidebarContent.querySelectorAll('.build-overlay-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const nodeId = btn.dataset.nodeId;
+                    const nodeLabel = btn.dataset.nodeLabel || 'Build';
+                    if (nodeId) this.runBuild(nodeId, nodeLabel);
+                });
+            });
 
             // Ajouter les event listeners pour les liens de nodes
             this.attachNodeLinkListeners();

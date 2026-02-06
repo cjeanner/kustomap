@@ -108,6 +108,28 @@
             <!-- Cytoscape Canvas -->
             <div id="cy"></div>
 
+            <!-- Loading overlay for build -->
+            <div id="build-loading" class="hidden">
+                <div class="build-loading-box">
+                    <span class="build-loading-spinner"></span>
+                    <p>Building overlay…</p>
+                </div>
+            </div>
+
+            <!-- Build result modal (fullscreen-ish YAML view) -->
+            <div id="build-modal" class="hidden">
+                <div class="build-modal-backdrop"></div>
+                <div class="build-modal-panel">
+                    <div class="build-modal-header">
+                        <h3 id="build-modal-title">Build output</h3>
+                        <button type="button" id="build-modal-close" title="Close">×</button>
+                    </div>
+                    <div class="build-modal-body">
+                        <pre id="build-modal-content"><code></code></pre>
+                    </div>
+                </div>
+            </div>
+
             <!-- Sidebar (hidden by default) -->
             <div id="sidebar" class="hidden">
                 <div id="sidebar-header">

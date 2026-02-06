@@ -9,11 +9,13 @@ A web application to visualize and explore Kustomize overlay structures in GitOp
 ## Overview
 
 - **Visual graph**: Interactive dependency tree of bases, overlays, components, and resources (Cytoscape.js in the frontend).
+- **Build overlay**: In the node details sidebar (ID, Type, Path block), a *Build overlay* button is shown for overlay/resource nodes (not components). Click it to build the overlay using the kustomize library (no `kustomize` binary required) and view the resulting YAML in a fullscreen-style modal.
 - **Sources**: GitHub, GitLab (URL + optional tokens), or local directory via browser File System API.
 - **API**: The Go server exposes a REST API used by the web UI:
   - `POST /api/v1/analyze` — submit a repo URL (optional `github_token` / `gitlab_token`); returns a graph `id`.
   - `GET /api/v1/graph/{id}` — fetch the analyzed graph.
   - `GET /api/v1/node/{graphID}/{nodeID}` — fetch node details.
+  - `POST /api/v1/node/{graphID}/{nodeID}/build` — build the overlay for that node using the kustomize Go API (same result as `kustomize build`; the kustomize binary is *not* required on the path). Optional body `{ "github_token", "gitlab_token" }`; returns `{ "yaml": "..." }`.
 
 ## Screenshots
 

@@ -2,9 +2,11 @@ package types
 
 // Graph represents the complete graph
 type Graph struct {
-	ID       string    `json:"id"`
-	Elements []Element `json:"elements"`
-	Created  string    `json:"created"`
+	ID       string            `json:"id"`
+	Elements []Element         `json:"elements"`
+	Created  string            `json:"created"`
+	// BaseURLs maps node ID -> repo base URL (e.g. https://gitlab.cee.redhat.com) for build
+	BaseURLs map[string]string `json:"base_urls,omitempty"`
 }
 
 // Element can be a node or an edge

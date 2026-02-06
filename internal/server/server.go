@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
+	"github.com/cjeanner/kustomap/internal/build"
 	"github.com/cjeanner/kustomap/internal/export"
 	"github.com/cjeanner/kustomap/internal/fetcher"
 	"github.com/cjeanner/kustomap/internal/parser"
@@ -48,6 +49,7 @@ func New(store storage.Storage, webRoot fs.FS) *chi.Mux {
 		r.Post("/analyze", handleAnalyze(store))
 		r.Get("/graph/{id}", handleGetGraph(store))
 		r.Get("/node/{graphID}/{nodeID}", handleGetNode(store))
+		r.Post("/node/{graphID}/{nodeID}/build", handleBuildNode(store))
 	})
 
 	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +214,69 @@ func handleGetNode(store storage.Storage) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(nodeDetails)
+	}
+}
+
+// BuildRequest is the optional JSON body for POST /api/v1/node/{graphID}/{nodeID}/build.
+type BuildRequest struct {
+	GitHubToken string `json:"github_token"`
+	GitLabToken string `json:"gitlab_token"`
+}
+
+// BuildResponse is the JSON response for a successful build.
+type BuildResponse struct {
+	YAML string `json:"yaml"`
+}
+
+func handleBuildNode(store storage.Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		graphID := chi.URLParam(r, "graphID")
+		nodeID := chi.URLParam(r, "nodeID")
+
+		decodedNodeID, err := url.QueryUnescape(nodeID)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid node ID")
+			return
+		}
+
+		nodeDetails, err := store.GetNode(graphID, decodedNodeID)
+		if err != nil {
+			respondError(w, http.StatusNotFound, err.Error())
+			return
+		}
+
+		if nodeDetails.Type == "component" {
+			respondError(w, http.StatusBadRequest, "Build is not available for component nodes; use an overlay or resource node")
+			return
+		}
+		if nodeDetails.Type == "error" {
+			respondError(w, http.StatusBadRequest, "Build is not available for error nodes")
+			return
+		}
+
+		var req BuildRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		graph, err := store.GetGraph(graphID)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "Graph not found")
+			return
+		}
+		baseURL := ""
+		if graph.BaseURLs != nil {
+			baseURL = graph.BaseURLs[decodedNodeID]
+		}
+
+		b := build.NewBuilder(req.GitHubToken, req.GitLabToken)
+		yamlOut, err := b.Build(decodedNodeID, baseURL)
+		if err != nil {
+			log.Printf("Build failed for node %s: %v", decodedNodeID, err)
+			respondError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(BuildResponse{YAML: yamlOut})
 	}
 }
 

@@ -64,7 +64,7 @@ func NewParser(f fetcher.Fetcher, repoInfo *repository.RepositoryInfo) *Parser {
 		fetcher:     f,
 		repoInfo:    repoInfo,
 		tokens:      make(map[repository.RepositoryType]string),
-		graph:       &types.Graph{Elements: []types.Element{}},
+		graph:       &types.Graph{Elements: []types.Element{}, BaseURLs: make(map[string]string)},
 		visitedURLs: make(map[string]bool),
 	}
 }
@@ -115,7 +115,7 @@ func (p *Parser) processKustomization(nodeID, content, currentPath string, curre
 	}
 
 	// Create node for this kustomization (type reflects how it was referenced)
-	p.addNode(nodeID, nodeType, currentPath, &kust)
+	p.addNode(nodeID, nodeType, currentPath, &kust, currentRepo.BaseURL)
 
 	// Merge bases into resources (backward compatibility)
 	allResources := append(kust.Resources, kust.Bases...)
@@ -145,7 +145,7 @@ func (p *Parser) processReference(parentID, ref, refType, currentPath string, cu
 	if isYAMLFile(ref) {
 		resourcePath := path.Join(currentPath, ref)
 		childID := p.buildNodeID(currentRepo, resourcePath)
-		p.addNode(childID, "resource", resourcePath, nil)
+		p.addNode(childID, "resource", resourcePath, nil, currentRepo.BaseURL)
 		p.addEdge(parentID, childID, refType)
 		return nil
 	}
@@ -155,7 +155,7 @@ func (p *Parser) processReference(parentID, ref, refType, currentPath string, cu
 	kustomizeRef, err := ParseReference(ref, token)
 	if err != nil {
 		childID := fmt.Sprintf("error:%s", ref)
-		p.addErrorNode(childID, ref, fmt.Sprintf("Failed to parse reference: %v", err))
+		p.addErrorNode(childID, ref, fmt.Sprintf("Failed to parse reference: %v", err), currentRepo.BaseURL)
 		p.addEdge(parentID, childID, refType) // Edge AFTER node creation
 		return nil
 	}
@@ -177,13 +177,13 @@ func (p *Parser) processReference(parentID, ref, refType, currentPath string, cu
 			tok := p.tokens[currentRepo.Type]
 			var err error
 			childFetcher, err = p.getFetcherForRepo(currentRepo, tok)
-			if err != nil {
-				childID := p.buildNodeID(currentRepo, childPath)
-				p.addErrorNode(childID, childPath, fmt.Sprintf("Failed to create fetcher: %v", err))
-				p.addEdge(parentID, childID, refType)
-				return nil
-			}
+		if err != nil {
+			childID := p.buildNodeID(currentRepo, childPath)
+			p.addErrorNode(childID, childPath, fmt.Sprintf("Failed to create fetcher: %v", err), currentRepo.BaseURL)
+			p.addEdge(parentID, childID, refType)
+			return nil
 		}
+	}
 
 	case ReferenceRemote:
 		childRepo = kustomizeRef.RepoInfo
@@ -194,7 +194,7 @@ func (p *Parser) processReference(parentID, ref, refType, currentPath string, cu
 		childFetcher, err = p.getFetcherForRepo(childRepo, token)
 		if err != nil {
 			childID := p.buildNodeID(childRepo, childPath)
-			p.addErrorNode(childID, childPath, fmt.Sprintf("Failed to create fetcher: %v", err))
+			p.addErrorNode(childID, childPath, fmt.Sprintf("Failed to create fetcher: %v", err), childRepo.BaseURL)
 			p.addEdge(parentID, childID, refType) // Edge AFTER node creation
 			return nil
 		}
@@ -211,7 +211,7 @@ func (p *Parser) processReference(parentID, ref, refType, currentPath string, cu
 		pathCopy := copyLogArgs(childPath)
 		errStr := copyLogArgs(err.Error())
 		log.Printf("⚠️  Warning: failed to fetch kustomization at %s: %s", pathCopy, errStr)
-		p.addErrorNode(childID, pathCopy, "File not found or inaccessible: "+errStr)
+		p.addErrorNode(childID, pathCopy, "File not found or inaccessible: "+errStr, childRepo.BaseURL)
 		p.addEdge(parentID, childID, refType)
 		return nil
 	}
@@ -224,7 +224,7 @@ func (p *Parser) processReference(parentID, ref, refType, currentPath string, cu
 }
 
 // addErrorNode adds an error node to the graph
-func (p *Parser) addErrorNode(id, path, errorMessage string) {
+func (p *Parser) addErrorNode(id, path, errorMessage, baseURL string) {
 	// Check if node already exists
 	for _, elem := range p.graph.Elements {
 		if elem.Group == "nodes" && elem.Data.ID == id {
@@ -248,6 +248,9 @@ func (p *Parser) addErrorNode(id, path, errorMessage string) {
 		},
 	})
 
+	if baseURL != "" {
+		p.graph.BaseURLs[id] = baseURL
+	}
 	log.Printf("Added error node: %s (error: %s)", copyLogArgs(id), copyLogArgs(errorMessage))
 }
 
@@ -260,7 +263,7 @@ func (p *Parser) processResource(parentID, resource, currentPath string, current
 		// Direct YAML file - create a resource node
 		resourcePath := path.Join(currentPath, resource)
 		resourceID := p.buildNodeID(currentRepo, resourcePath)
-		p.addNode(resourceID, "resource", resourcePath, nil)
+		p.addNode(resourceID, "resource", resourcePath, nil, currentRepo.BaseURL)
 		p.addEdge(parentID, resourceID, "resource")
 		return nil
 	}
@@ -279,7 +282,7 @@ func (p *Parser) buildNodeID(repoInfo *repository.RepositoryInfo, nodePath strin
 }
 
 // addNode adds a node to the graph
-func (p *Parser) addNode(id, nodeType, nodePath string, kust *Kustomization) {
+func (p *Parser) addNode(id, nodeType, nodePath string, kust *Kustomization, baseURL string) {
 	var content map[string]interface{}
 	if kust != nil {
 		content = map[string]interface{}{
@@ -307,10 +310,16 @@ func (p *Parser) addNode(id, nodeType, nodePath string, kust *Kustomization) {
 				elem.Data = newData
 				log.Printf("Replaced error node with success node: %s (type: %s)", id, nodeType)
 			}
+			if baseURL != "" {
+				p.graph.BaseURLs[id] = baseURL
+			}
 			return
 		}
 	}
 
+	if baseURL != "" {
+		p.graph.BaseURLs[id] = baseURL
+	}
 	p.graph.Elements = append(p.graph.Elements, types.Element{
 		Group: "nodes",
 		Data:  newData,
