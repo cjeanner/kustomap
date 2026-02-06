@@ -84,4 +84,34 @@ This project was created using AI tools. The **tool/AI used to port the original
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+This project is licensed under **Apache-2.0** — see [LICENSE](LICENSE).
+
+### Third-party licenses
+
+For transparency, all third-party dependencies and their licenses are listed below. This project does not modify or distribute their source; they are loaded at runtime (frontend via CDN) or linked as Go modules.
+
+**Frontend (JavaScript, loaded in the browser):**
+
+| Package | Version | License | Notes |
+|---------|---------|---------|--------|
+| [Cytoscape.js](https://github.com/cytoscape/cytoscape.js) | 3.28.1 | MIT | Graph visualization |
+| [cytoscape-svg](https://github.com/kinimesi/cytoscape-svg) | 0.4.0 | **GPL-3.0** | SVG export — see note below |
+| [dagre](https://github.com/dagrejs/dagre) | 0.8.5 | MIT | Graph layout |
+| [cytoscape-dagre](https://github.com/cytoscape/cytoscape.js-dagre) | 2.5.0 | MIT | Dagre layout for Cytoscape |
+
+**Backend (Go modules):**
+
+| Package | License |
+|---------|---------|
+| [github.com/go-chi/chi/v5](https://github.com/go-chi/chi) | MIT |
+| [github.com/google/go-github/v82](https://github.com/google/go-github) | MIT |
+| [github.com/google/uuid](https://github.com/google/uuid) | BSD-3-Clause |
+| [github.com/google/go-querystring](https://github.com/google/go-querystring) | BSD-3-Clause |
+| [github.com/hashicorp/go-cleanhttp](https://github.com/hashicorp/go-cleanhttp) | MPL-2.0 |
+| [github.com/hashicorp/go-retryablehttp](https://github.com/hashicorp/go-retryablehttp) | MPL-2.0 |
+| [gitlab.com/gitlab-org/api/client-go](https://gitlab.com/gitlab-org/api/client-go) | Apache-2.0 |
+| [golang.org/x/oauth2](https://pkg.go.dev/golang.org/x/oauth2) | BSD-3-Clause |
+| [golang.org/x/time](https://pkg.go.dev/golang.org/x/time) | BSD-3-Clause |
+| [gopkg.in/yaml.v3](https://github.com/go-yaml/yaml) | Apache-2.0 & MIT |
+
+**Note on cytoscape-svg (GPL-3.0):** The SVG export feature uses cytoscape-svg, which is the only GPL-3.0 dependency. GPL-3.0 is not compatible with distributing a combined work under Apache-2.0 only. If you need strict Apache-2.0 compatibility (e.g. for distribution or inclusion in Apache-licensed works), be aware that using the SVG export in this application may implicate GPL-3.0 for that combined use.
