@@ -328,8 +328,15 @@ class App {
         const modal = document.getElementById('browse-modal');
         if (!modal) return;
         modal.classList.remove('hidden');
-        this.browseCurrentPath = '';
-        await this.loadBrowseDirs();
+
+        const urlInput = document.getElementById('url');
+        const raw = (urlInput?.value ?? '').trim();
+        const isRemoteUrl = /^https?:\/\//i.test(raw);
+        let initialPath = (!raw || isRemoteUrl) ? '' : raw;
+        if (initialPath === '~') initialPath = '';
+
+        const ok = await this.loadBrowseDirs(initialPath);
+        if (!ok && initialPath) await this.loadBrowseDirs();
     }
 
     async loadBrowseDirs(path) {
@@ -338,7 +345,7 @@ class App {
         const breadcrumbEl = document.getElementById('browse-breadcrumb');
         const usePathBtn = document.getElementById('browse-use-path-btn');
 
-        if (!listEl || !loadingEl) return;
+        if (!listEl || !loadingEl) return false;
 
         loadingEl.classList.remove('hidden');
         listEl.innerHTML = '';
@@ -401,8 +408,10 @@ class App {
                 usePathBtn.disabled = false;
                 usePathBtn.textContent = 'Use this path';
             }
+            return true;
         } catch (err) {
             listEl.innerHTML = '<li style="cursor:default;color:#c33;">' + (err.message || 'Failed to load') + '</li>';
+            return false;
         } finally {
             loadingEl.classList.add('hidden');
         }
